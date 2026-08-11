@@ -7,9 +7,23 @@ different question from a protocol health-factor view: **if many positions becom
 liquidatable together, can available market liquidity actually absorb the sales?**
 
 The MVP simulates an XLM price shock, an XLM/USDC liquidity contraction, liquidation
-execution, estimated bad debt, and iterative liquidation feedback. It integrates with
-Stellar rather than replacing Blend, the Stellar DEX, AMMs, price feeds, or
-liquidators.
+execution across the SDEX order book and AMM pools, estimated bad debt, and iterative
+liquidation feedback. It integrates with Stellar rather than replacing Blend, the
+Stellar DEX, AMMs, price feeds, or liquidators.
+
+## What's inside
+
+- **Deterministic stress-test engine** — price/liquidity shocks, an oracle-misbehavior
+  model (delay, ramp, divergence, staleness, total failure), multi-venue execution, and
+  iterative cascade until no new positions are liquidatable.
+- **Historical replay** — ledger-pinned episodes replayed against archived outcomes to
+  measure prediction-vs-observed error and calibrate the model.
+- **Async job queue** — durable Redis-backed queue with a background worker; falls back
+  to in-process execution when no Redis is configured, so it runs anywhere.
+- **Observability** — structured JSON logs, counters and timing metrics behind
+  `GET /api/v1/metrics`.
+- **Multi-page dashboard** — Overview, Stress Lab, Protocols, Markets, Liquidations,
+  Scenarios, Historical Replay, Risk Reports, API reference, and Documentation.
 
 ## Important data notice
 
@@ -41,23 +55,37 @@ docker compose up --build
 
 The Compose stack starts the Next.js Node API/UI plus PostgreSQL. With `DATABASE_URL`
 configured, completed reports are persisted; without it, local reports are intentionally
-in-memory and disappear at restart.
+in-memory and disappear at restart. Async jobs run in-process unless `REDIS_URL` is set;
+with Redis, run the worker loop in a separate process:
+
+```bash
+npm run worker
+```
 
 ## API
 
+The versioned developer API lives under `/api/v1`. Set `STEBULLX_API_KEY` in a hosted
+deployment to require an `x-api-key` header for stress-test creation and retrieval.
+The read-only MVP dataset endpoints remain open to support reproducible public
+demonstrations. `GET /api/v1/metrics` needs no key.
+
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/protocols` | Supported protocol adapters and their data status |
-| `GET /api/protocols/blend/markets` | Supported markets plus provenance |
-| `GET /api/scenarios` | Starter stress scenarios |
-| `POST /api/stress-test` | Run a simulation |
-| `GET /api/stress-tests/:id` | Retrieve a completed result |
+| `GET /api/v1/protocols` | Supported protocol adapters and their data status |
+| `GET /api/v1/markets` | Markets with spot reference and executable depth |
+| `GET /api/v1/positions` | Protocol positions from the active snapshot |
+| `GET /api/v1/liquidity` | Order-book levels and AMM pools |
+| `POST /api/v1/stress-tests` | Run a stress test synchronously (201 + full result) |
+| `POST /api/v1/stress-tests/async` | Enqueue a stress test (202 + job id) |
+| `GET /api/v1/stress-tests/:id` | Fetch a stored result by deterministic id |
+| `GET /api/v1/jobs/:id` | Poll job status; result included when done |
+| `GET /api/v1/replays` | Historical replay archive episodes |
+| `GET /api/v1/replays/:id` | Single archived episode |
+| `POST /api/v1/replays/:id/replay` | Run a replay, get prediction-vs-observed errors |
+| `GET /api/v1/metrics` | Observability counters and durations |
 
-The versioned developer API is available under `/api/v1` (`/protocols`,
-`/markets`, `/liquidity`, `/positions`, and `/stress-tests`). Set
-`STEBULLX_API_KEY` in a hosted deployment to require an `x-api-key` header for
-stress-test creation and retrieval. The read-only MVP dataset endpoints remain
-open to support reproducible public demonstrations.
+Unversioned convenience routes also exist for the dashboard: `POST /api/stress-test`,
+`GET /api/scenarios`, `GET /api/protocols`, and `GET /api/protocols/:id/markets`.
 
 Example request:
 
@@ -68,12 +96,20 @@ Example request:
     "name": "XLM -20% / liquidity -40%",
     "assetPriceShocks": { "XLM": -0.2 },
     "liquidityShocks": { "XLM_USDC": -0.4 },
-    "oracleDelaySeconds": 30,
+    "oracle": {
+      "delaySeconds": 30,
+      "rampSeconds": 30,
+      "divergence": 0,
+      "staleAfterSeconds": 0,
+      "failure": false
+    },
     "maxCascadeIterations": 10,
     "maxSlippage": 0.1
   }
 }
 ```
+
+`oracleDelaySeconds` is accepted as a back-compat alias for `oracle.delaySeconds`.
 
 ## Model methodology
 
@@ -89,11 +125,20 @@ LTV              = debt_value / collateral_value
 Classifications are HEALTHY (HF ≥ 1.15), AT_RISK (1.00–1.15), LIQUIDATABLE
 (0.75–1.00), and SEVERELY_UNDERCOLLATERALIZED (< 0.75). For liquidatable XLM
 positions, the model sells enough XLM to target debt plus the configured liquidation
-bonus, capped by XLM collateral. It consumes modeled SDEX bid levels in price order
-and then uses a constant-product AMM approximation. It measures execution shortfall
-against the scenario reference price, feeds a disclosed portion of the impact into the
-next market round, and repeats until no new positions are liquidatable or the iteration
-limit is reached.
+bonus, capped by XLM collateral.
+
+**Oracle path** — the feed moves from the pre-shock price to the shocked price after
+`delaySeconds`, over a `rampSeconds` linear transition, optionally with a `divergence`
+bias. `staleAfterSeconds` freezes the feed mid-crash and `failure` pins valuations at
+the pre-shock price entirely, so liquidations only trigger for positions already
+underwater.
+
+**Execution** — each sale fills venues in price-priority order: scenario-scaled SDEX
+bid levels first, then each constant-product AMM pool up to an execution cap of 75% of
+pool reserves. Every estimate carries a per-venue breakdown. The model measures
+execution shortfall against the scenario reference price, feeds 45% of the realized
+impact into the next market round as a conservative feedback rule, and repeats until no
+new positions are liquidatable or the iteration limit is reached.
 
 **Liquidation Capacity** is the largest $50k-grid sale which completely executes within
 the selected slippage limit in the scenario-scaled liquidity state. It is a model-derived
@@ -107,13 +152,17 @@ debt. See [docs/methodology.md](docs/methodology.md) for limits and assumptions.
 
 ```text
 src/
-  app/api/             Node/TypeScript API routes
+  app/                 Next.js pages (multi-page dashboard) and API routes
+  components/          Shared UI primitives and the topbar navigation
   core/                Stable domain contracts and math
-  data/                Explicitly labelled deterministic demo fixture
-  engine/              Revaluation, execution, cascade, risk-score engines
+  data/                Explicitly labelled deterministic demo fixture + historical archive
+  engine/              Revaluation, execution, cascade, risk-score, replay engines
+  lib/                 Canned deterministic analytics for the dashboard
   market-data/         Pluggable Stellar market data provider
   protocols/blend/     MVP Blend adapter
-  services/            PostgreSQL/in-memory report persistence
+  services/            Persistence, Redis queue, worker jobs, observability
+scripts/
+  worker.ts            Background job worker loop (Redis)
 contracts/
   stress-registry/     Optional Soroban hash-attestation contract
 services/api/          PostgreSQL schema and API deployment notes
@@ -132,10 +181,10 @@ verification of an immutable published pair. It does not custody funds.
 ## Scope and next integration step
 
 This is a technically focused MVP: one protocol adapter, XLM/USDC, deterministic
-scenario tests, and a no-custody dashboard. The highest-value next step is a verified,
-ledger-pinned Blend indexing adapter, followed by venue-complete liquidity adapters and
-historical replay. Do not use the demo output for investment, operational, or solvency
-decisions.
+scenario tests, historical replay for calibration, and a no-custody dashboard. The
+highest-value next step is a verified, ledger-pinned Blend indexing adapter, followed
+by venue-complete liquidity adapters and multi-protocol stress testing. Do not use the
+demo output for investment, operational, or solvency decisions.
 
 ## License
 

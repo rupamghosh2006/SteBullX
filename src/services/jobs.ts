@@ -4,9 +4,11 @@ import { getEpisode } from "@/data/historical-archive";
 import { BlendAdapter } from "@/protocols/blend/adapter";
 import { saveResult } from "@/services/result-store";
 import { takeJob, updateJob, type Job } from "@/services/queue";
+import { error as logError, info, recordMetric } from "@/services/observability";
 import type { StressScenario } from "@/core/types";
 
 export async function processJob(job: Job): Promise<void> {
+  const startedAt = performance.now();
   try {
     if (job.type === "STRESS_TEST") {
       const protocol = (job.payload.protocol as string | undefined) ?? "blend";
@@ -15,6 +17,8 @@ export async function processJob(job: Job): Promise<void> {
       const result = runStressTest(await new BlendAdapter().getSnapshot(), scenario);
       await saveResult(result);
       await updateJob(job.jobId, { status: "SUCCEEDED", resultId: result.id, finishedAt: new Date().toISOString() });
+      await recordMetric("jobs.processed");
+      info("job.succeeded", { jobId: job.jobId, type: job.type, resultId: result.id, durationMs: Math.round((performance.now() - startedAt) * 100) / 100 });
       return;
     }
     if (job.type === "REPLAY") {
@@ -24,12 +28,16 @@ export async function processJob(job: Job): Promise<void> {
       const replay = replayEpisode(episode);
       await saveResult(replay);
       await updateJob(job.jobId, { status: "SUCCEEDED", resultId: replay.id, finishedAt: new Date().toISOString() });
+      await recordMetric("jobs.processed");
+      info("job.succeeded", { jobId: job.jobId, type: job.type, resultId: replay.id, durationMs: Math.round((performance.now() - startedAt) * 100) / 100 });
       return;
     }
     throw new Error(`Unsupported job type ${job.type}.`);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Job failed.";
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : "Job failed.";
     await updateJob(job.jobId, { status: "FAILED", error: message, finishedAt: new Date().toISOString() });
+    await recordMetric("jobs.failed");
+    logError("job.failed", { jobId: job.jobId, type: job.type, error: message, durationMs: Math.round((performance.now() - startedAt) * 100) / 100 });
   }
 }
 

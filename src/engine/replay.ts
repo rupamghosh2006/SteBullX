@@ -1,6 +1,7 @@
 import { round } from "@/core/math";
 import { sha256 } from "@/core/hash";
 import { runStressTest, MODEL_VERSION } from "@/engine/simulation";
+import { info, recordDuration, recordMetric } from "@/services/observability";
 import type { HistoricalEpisode, HistoricalReplayResult, StressScenario } from "@/core/types";
 
 /**
@@ -9,6 +10,7 @@ import type { HistoricalEpisode, HistoricalReplayResult, StressScenario } from "
  * prediction against the archived outcome. Errors feed model calibration.
  */
 export function replayEpisode(episode: HistoricalEpisode): HistoricalReplayResult {
+  const startedAt = performance.now();
   const first = episode.marketPath[0];
   const last = episode.marketPath[episode.marketPath.length - 1];
   if (!first || !last) throw new Error(`Episode ${episode.id} has no market path.`);
@@ -42,7 +44,7 @@ export function replayEpisode(episode: HistoricalEpisode): HistoricalReplayResul
     "Observed values are archived for calibration demonstration; do not treat them as live on-chain data.",
   ];
 
-  return {
+  const replay: HistoricalReplayResult = {
     id: `REPLAY-${inputHash.slice(0, 16).toUpperCase()}`,
     episodeId: episode.id,
     protocol: episode.protocol,
@@ -67,4 +69,9 @@ export function replayEpisode(episode: HistoricalEpisode): HistoricalReplayResul
     inputHash,
     warnings,
   };
+  const durationMs = performance.now() - startedAt;
+  void recordMetric("replay.runs");
+  void recordDuration("replay.durationMs", durationMs);
+  info("replay.completed", { replayId: replay.id, episodeId: episode.id, durationMs: Math.round(durationMs * 100) / 100, liquidationVolumeErrorPct: replay.errors.liquidationVolumeErrorPct });
+  return replay;
 }

@@ -4,6 +4,7 @@ import { assessDataQuality } from "@/engine/data-quality";
 import { applyMarketImpact, executeCollateralSale, liquidityValue, stressedLiquidity } from "@/engine/liquidation";
 import { basePrices, oracleReportedPrice, resolveOracle, revaluePositions, shockedPrices, validateScenario } from "@/engine/revaluation";
 import { calculateRiskScore } from "@/engine/risk-score";
+import { info, recordDuration, recordMetric } from "@/services/observability";
 import type { CascadeIteration, ExecutionEstimate, OracleScenario, ProtocolSnapshot, RevaluedPosition, StressScenario, StressTestResult } from "@/core/types";
 
 const isLiquidatable = (position: RevaluedPosition) => position.classification === "LIQUIDATABLE" || position.classification === "SEVERELY_UNDERCOLLATERALIZED";
@@ -43,6 +44,7 @@ function calculateCapacity(state: ReturnType<typeof stressedLiquidity>, price: n
 }
 
 export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenario): StressTestResult {
+  const startedAt = performance.now();
   validateScenario(scenario);
   const oracle = resolveOracle(scenario);
   const market = snapshot.markets.find((item) => item.id === "XLM_USDC");
@@ -202,5 +204,9 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
     cascade: result.cascade,
     assumptions: result.assumptions,
   });
+  const durationMs = performance.now() - startedAt;
+  void recordMetric("simulation.runs");
+  void recordDuration("simulation.durationMs", durationMs);
+  info("simulation.completed", { simulationId: result.id, scenario: scenario.name, durationMs: Math.round(durationMs * 100) / 100, cascadeDepth: result.summary.cascadeDepth, badDebtUsd: result.summary.potentialBadDebtUsd, dataKind: result.data.kind });
   return result;
 }

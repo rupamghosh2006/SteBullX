@@ -7,11 +7,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "worker": "tsx scripts/worker.ts",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "ioredis": "^6.0.0",
     "next": "15.5.23",
     "pg": "8.16.3",
     "react": "19.1.1",
@@ -22,6 +24,7 @@
     "@types/react": "19.1.2",
     "@types/react-dom": "19.1.2",
     "@types/pg": "8.15.4",
+    "tsx": "4.23.12",
     "typescript": "5.8.3",
     "vitest": "3.1.2"
   }

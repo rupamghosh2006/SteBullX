@@ -46,6 +46,7 @@ export function replayEpisode(episode: HistoricalEpisode): HistoricalReplayResul
     id: `REPLAY-${inputHash.slice(0, 16).toUpperCase()}`,
     episodeId: episode.id,
     protocol: episode.protocol,
+    market: episode.marketId,
     marketId: episode.marketId,
     startLedger: episode.startLedger,
     endLedger: episode.endLedger,

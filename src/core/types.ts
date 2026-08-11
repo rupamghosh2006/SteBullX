@@ -224,6 +224,7 @@ export interface HistoricalReplayResult {
   id: string;
   episodeId: string;
   protocol: string;
+  market: string;
   marketId: string;
   startLedger: number;
   endLedger: number;

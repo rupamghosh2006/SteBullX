@@ -5,6 +5,8 @@ import { replayEpisode } from "@/engine/replay";
 import { executeCollateralSale, liquidityValue, poolTouchPrice, stressedLiquidity } from "@/engine/liquidation";
 import { applyPriceShocks, oracleReportedPrice, revaluePosition, resolveOracle } from "@/engine/revaluation";
 import { defaultScenario, runStressTest } from "@/engine/simulation";
+import { enqueueJob, getJob, takeJob, updateJob } from "@/services/queue";
+import { processJob } from "@/services/jobs";
 
 describe("position revaluation", () => {
   it("applies a -20% XLM price shock and recalculates health factor", () => {
@@ -146,6 +148,42 @@ describe("historical replay", () => {
     const ascending = structuredClone(replayArchive[2]);
     ascending.marketPath = [{ ledger: 1, xlmUsd: 0.4 }, { ledger: 2, xlmUsd: 0.45 }];
     expect(() => replayEpisode(ascending)).toThrow("market decline");
+  });
+});
+
+describe("job queue", () => {
+  it("consumes queued jobs and updates status to RUNNING", async () => {
+    const job = await enqueueJob("REPLAY", { episodeId: replayArchive[2].id });
+    const taken = await takeJob(1);
+    expect(taken?.jobId).toBe(job.jobId);
+    expect((await getJob(job.jobId))?.status).toBe("RUNNING");
+    await updateJob(job.jobId, { status: "SUCCEEDED" });
+  });
+
+  it("runs a stress-test job and marks it succeeded with a result id", async () => {
+    const job = await enqueueJob("STRESS_TEST", { protocol: "blend", scenario: defaultScenario });
+    expect(job.status).toBe("QUEUED");
+    await processJob(job);
+    const done = await getJob(job.jobId);
+    expect(done?.status).toBe("SUCCEEDED");
+    expect(done?.resultId).toMatch(/^STRESS-/);
+    expect(done?.finishedAt).toBeTruthy();
+  });
+
+  it("marks replay jobs succeeded with a REPLAY result id", async () => {
+    const job = await enqueueJob("REPLAY", { episodeId: replayArchive[0].id });
+    await processJob(job);
+    const done = await getJob(job.jobId);
+    expect(done?.status).toBe("SUCCEEDED");
+    expect(done?.resultId).toMatch(/^REPLAY-/);
+  });
+
+  it("fails unknown job types with an error message", async () => {
+    const job = await enqueueJob("STRESS_TEST", { protocol: "templar" });
+    await processJob(job);
+    const done = await getJob(job.jobId);
+    expect(done?.status).toBe("FAILED");
+    expect(done?.error).toContain("Only the Blend MVP adapter");
   });
 });
 

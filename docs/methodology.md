@@ -23,19 +23,24 @@ frontend label alone.
 ## Execution and cascade model
 
 1. Apply per-asset price shocks and per-market liquidity shocks.
-2. Revalue every position with published liquidation thresholds.
-3. Queue previously unprocessed liquidatable positions.
-4. Sell the modelled XLM seizure into scenario-scaled bid levels, then a constant-product
-   AMM approximation when present.
-5. Measure average execution shortfall from the scenario reference price.
-6. Apply 45% of realized impact to residual venue pricing as a deliberately conservative,
+2. Model the oracle price path during the shock: configurable delay before the feed
+   starts moving, a linear ramp to the shocked price, an optional divergence bias,
+   optional staleness (feed freezes partway), and optional total failure (feed never
+   moves, valuations pinned at the pre-shock price).
+3. Revalue every position with published liquidation thresholds.
+4. Queue previously unprocessed liquidatable positions.
+5. Sell the modelled XLM seizure across execution venues in price-priority order:
+   scenario-scaled SDEX bid levels first, then each constant-product AMM pool up to its
+   execution cap (75% of pool reserves), using the best available reference price per
+   venue. Each estimate carries a per-venue breakdown.
+6. Measure average execution shortfall from the scenario reference price.
+7. Apply 45% of realized impact to residual venue pricing as a deliberately conservative,
    inspectable cascade feedback rule.
-7. Revalue all positions and repeat.
+8. Revalue all positions and repeat.
 
 This does not model latency, bot competition, partial debt repayment, protocol-specific
-close factors, oracle behavior beyond the disclosed delay parameter, bridge risk, issuer
-risk, order cancellation, or cross-venue routing. Those must be added protocol by
-protocol before an operational deployment.
+close factors, bridge risk, issuer risk, order cancellation, or adaptive cross-venue
+routing. Those must be added protocol by protocol before an operational deployment.
 
 ## Reproducibility
 

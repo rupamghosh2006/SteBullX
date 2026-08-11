@@ -47,8 +47,18 @@ describe("cascade and scoring", () => {
     expect(first.summary).toEqual(second.summary);
     expect(first.risk).toEqual(second.risk);
     expect(first.cascade).toEqual(second.cascade);
+    expect(first.id).toBe(second.id);
+    expect(first.audit.inputHash).toBe(second.audit.inputHash);
+    expect(first.audit.resultHash).toBe(second.audit.resultHash);
     expect(first.summary.liquidationCapacityUsd).toBeGreaterThanOrEqual(0);
     expect(first.risk.score).toBeGreaterThanOrEqual(0);
     expect(first.risk.score).toBeLessThanOrEqual(100);
+  });
+
+  it("reports low confidence for demo inputs rather than implying live-data certainty", () => {
+    const result = runStressTest(structuredClone(demoBlendSnapshot), defaultScenario);
+    expect(result.dataQuality.level).toBe("LOW");
+    expect(result.dataQuality.warnings[0]).toContain("DEMO fixture");
+    expect(result.summary.stressLossUsd).toBe(result.summary.potentialBadDebtUsd);
   });
 });

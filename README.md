@@ -53,6 +53,12 @@ in-memory and disappear at restart.
 | `POST /api/stress-test` | Run a simulation |
 | `GET /api/stress-tests/:id` | Retrieve a completed result |
 
+The versioned developer API is available under `/api/v1` (`/protocols`,
+`/markets`, `/liquidity`, `/positions`, and `/stress-tests`). Set
+`STEBULLX_API_KEY` in a hosted deployment to require an `x-api-key` header for
+stress-test creation and retrieval. The read-only MVP dataset endpoints remain
+open to support reproducible public demonstrations.
+
 Example request:
 
 ```json

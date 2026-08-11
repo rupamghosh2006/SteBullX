@@ -1,10 +1,13 @@
 import { round, sum } from "@/core/math";
+import { sha256 } from "@/core/hash";
+import { assessDataQuality } from "@/engine/data-quality";
 import { applyMarketImpact, executeCollateralSale, liquidityValue, stressedLiquidity } from "@/engine/liquidation";
 import { applyPriceShocks, basePrices, revaluePositions, validateScenario } from "@/engine/revaluation";
 import { calculateRiskScore } from "@/engine/risk-score";
 import type { CascadeIteration, ExecutionEstimate, ProtocolSnapshot, RevaluedPosition, StressScenario, StressTestResult } from "@/core/types";
 
 const isLiquidatable = (position: RevaluedPosition) => position.classification === "LIQUIDATABLE" || position.classification === "SEVERELY_UNDERCOLLATERALIZED";
+export const MODEL_VERSION = "stebullx-mvp-model-v1";
 
 export const defaultScenario: StressScenario = {
   id: "xlm-20-liquidity-40",
@@ -53,9 +56,11 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
   let liquidityState = initialLiquidityState;
 
   const initialRevalued = revaluePositions(snapshot, prices);
+  const initiallyLiquidatable = initialRevalued.filter(isLiquidatable);
   const totalCollateralUsd = sum(initialRevalued.map((position) => position.collateralValueUsd));
   const totalDebtUsd = sum(initialRevalued.map((position) => position.debtValueUsd));
-  const firstDemandUsd = sum(initialRevalued.filter(isLiquidatable).map((position) => liquidationDemand(position, snapshot, prices.XLM).requestedBaseAmount * prices.XLM));
+  const liquidationExposureUsd = sum(initiallyLiquidatable.map((position) => position.collateralValueUsd));
+  const firstDemandUsd = sum(initiallyLiquidatable.map((position) => liquidationDemand(position, snapshot, prices.XLM).requestedBaseAmount * prices.XLM));
   const curve = executionCurve(initialLiquidityState, initialPrice);
   const liquidationCapacityUsd = calculateCapacity(initialLiquidityState, initialPrice, scenario.maxSlippage, Math.max(firstDemandUsd, 2_000_000));
 
@@ -112,8 +117,12 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
     maxIterations: scenario.maxCascadeIterations,
   });
 
-  return {
-    id: `stress-${crypto.randomUUID()}`,
+  const dataQuality = assessDataQuality(snapshot);
+  const scenarioHash = sha256(scenario);
+  const inputHash = sha256({ snapshot, scenario, modelVersion: MODEL_VERSION });
+  const deterministicId = `STRESS-${inputHash.slice(0, 16).toUpperCase()}`;
+  const result: StressTestResult = {
+    id: deterministicId,
     protocol: snapshot.protocol,
     market: market.id,
     scenario,
@@ -123,15 +132,27 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
       totalPositions: snapshot.positions.length,
       affectedPositions: affected.size,
       liquidatablePositions: processed.size,
+      liquidationExposureUsd: round(liquidationExposureUsd),
+      liquidationDemandUsd: round(liquidatableCollateralUsd),
       liquidatableCollateralUsd: round(liquidatableCollateralUsd),
       estimatedRecoverableValueUsd: round(recoveredUsd),
       potentialBadDebtUsd: round(badDebtUsd),
+      stressLossUsd: round(badDebtUsd),
       normalLiquidityUsd: round(market.executableDepthUsd),
       stressedLiquidityUsd: round(liquidityValue(initialLiquidityState)),
       liquidationCapacityUsd: round(liquidationCapacityUsd),
       cascadeDepth: cascade.length,
     },
     risk,
+    dataQuality,
+    audit: {
+      deterministicId,
+      inputHash,
+      scenarioHash,
+      resultHash: "",
+      sourceLedger: snapshot.provenance.ledger,
+      modelVersion: MODEL_VERSION,
+    },
     positions: finalPositions,
     executionCurve: curve.map((estimate) => ({ ...estimate, requestedBaseAmount: round(estimate.requestedBaseAmount), executedBaseAmount: round(estimate.executedBaseAmount), recoveredUsd: round(estimate.recoveredUsd), averageExecutionPrice: round(estimate.averageExecutionPrice, 6), priceImpact: round(estimate.priceImpact, 4), slippage: round(estimate.slippage, 4), unexecutedBaseAmount: round(estimate.unexecutedBaseAmount) })),
     cascade,
@@ -144,6 +165,17 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
       "A liquidatable position is processed once per run; unrecovered debt is the modeled shortfall between that group’s debt and recovered sale proceeds.",
       "SteBullX provides modeled risk estimates and does not guarantee protocol solvency, liquidation outcomes, or future market behavior.",
     ],
-    methodologyVersion: "stebullx-mvp-model-v1",
+    methodologyVersion: MODEL_VERSION,
   };
+  result.audit.resultHash = sha256({
+    audit: { inputHash, scenarioHash, modelVersion: MODEL_VERSION },
+    summary: result.summary,
+    risk: result.risk,
+    dataQuality: result.dataQuality,
+    positions: result.positions,
+    executionCurve: result.executionCurve,
+    cascade: result.cascade,
+    assumptions: result.assumptions,
+  });
+  return result;
 }

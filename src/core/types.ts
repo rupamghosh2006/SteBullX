@@ -128,6 +128,29 @@ export interface RiskBreakdown {
   level: RiskLevel;
 }
 
+export interface DataQualityAssessment {
+  /** 0–100 confidence in input/model suitability, not the probability that a result is true. */
+  confidenceScore: number;
+  level: "LOW" | "MODERATE" | "HIGH";
+  components: {
+    dataFreshness: number;
+    dataCompleteness: number;
+    sourceCoverage: number;
+    adapterReliability: number;
+    modelCalibration: number;
+  };
+  warnings: string[];
+}
+
+export interface SimulationAudit {
+  deterministicId: string;
+  inputHash: string;
+  scenarioHash: string;
+  resultHash: string;
+  sourceLedger?: number;
+  modelVersion: string;
+}
+
 export interface StressTestResult {
   id: string;
   protocol: string;
@@ -139,15 +162,20 @@ export interface StressTestResult {
     totalPositions: number;
     affectedPositions: number;
     liquidatablePositions: number;
+    liquidationExposureUsd: number;
+    liquidationDemandUsd: number;
     liquidatableCollateralUsd: number;
     estimatedRecoverableValueUsd: number;
     potentialBadDebtUsd: number;
+    stressLossUsd: number;
     normalLiquidityUsd: number;
     stressedLiquidityUsd: number;
     liquidationCapacityUsd: number;
     cascadeDepth: number;
   };
   risk: RiskBreakdown;
+  dataQuality: DataQualityAssessment;
+  audit: SimulationAudit;
   positions: RevaluedPosition[];
   executionCurve: ExecutionEstimate[];
   cascade: CascadeIteration[];

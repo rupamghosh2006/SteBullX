@@ -1,0 +1,7 @@
+:root { --ink:#f4f4f0; --muted:#a5a5a1; --line:#2a2a28; --panel:#111110; --paper:#080808; --danger:#ff735c; --warning:#f4c95d; --ok:#8dd694; }
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body { margin:0; background:var(--paper); color:var(--ink); font-family:Arial, Helvetica, sans-serif; letter-spacing:-.01em; }
+button, input, select { font:inherit; }
+button { cursor:pointer; }
+.mono { font-family:"SFMono-Regular", Consolas, monospace; letter-spacing:-.04em; }

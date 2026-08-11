@@ -20,7 +20,7 @@ export function assessDataQuality(snapshot: ProtocolSnapshot): DataQualityAssess
   }
   const freshness = snapshot.provenance.kind === "LIVE" ? 90 : snapshot.provenance.kind === "INDEXED" ? 75 : 50;
   const completeness = snapshot.positions.length > 0 && snapshot.liquidity.length > 0 ? 85 : 40;
-  const coverage = snapshot.liquidity.some((item) => item.amm) ? 70 : 55;
+  const coverage = snapshot.liquidity.some((item) => (item.amms?.length ?? 0) > 0) ? 70 : 55;
   const adapter = snapshot.provenance.ledger ? 85 : 60;
   const calibration = 40;
   const confidenceScore = round(freshness * 0.25 + completeness * 0.25 + coverage * 0.2 + adapter * 0.2 + calibration * 0.1, 0);

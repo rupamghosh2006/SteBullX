@@ -1,5 +1,5 @@
 import { clamp, sum } from "@/core/math";
-import type { Position, PositionClassification, ProtocolSnapshot, RevaluedPosition, StressScenario } from "@/core/types";
+import type { OracleScenario, Position, PositionClassification, ProtocolSnapshot, RevaluedPosition, StressScenario } from "@/core/types";
 
 export type PriceMap = Record<string, number>;
 
@@ -17,6 +17,38 @@ export function applyPriceShocks(prices: PriceMap, scenario: StressScenario): Pr
     if (shock <= -1) throw new Error(`Price shock for ${asset} must be greater than -100%.`);
     return [asset, price * (1 + shock)];
   }));
+}
+
+export const DEFAULT_ORACLE: OracleScenario = { delaySeconds: 30, rampSeconds: 30, divergence: 0, staleAfterSeconds: 0, failure: false };
+
+/** Back-compat: a bare oracleDelaySeconds still produces a working oracle model. */
+export function resolveOracle(scenario: StressScenario): OracleScenario {
+  return {
+    delaySeconds: scenario.oracle?.delaySeconds ?? scenario.oracleDelaySeconds ?? DEFAULT_ORACLE.delaySeconds,
+    rampSeconds: scenario.oracle?.rampSeconds ?? DEFAULT_ORACLE.rampSeconds,
+    divergence: scenario.oracle?.divergence ?? DEFAULT_ORACLE.divergence,
+    staleAfterSeconds: scenario.oracle?.staleAfterSeconds ?? DEFAULT_ORACLE.staleAfterSeconds,
+    failure: scenario.oracle?.failure ?? DEFAULT_ORACLE.failure,
+  };
+}
+
+/**
+ * Oracle convergence curve: the reported price moves linearly from the
+ * pre-shock price to the shocked price over rampSeconds. The oracle reads
+ * the curve at (lastUpdate - delay), i.e. it lags the true market price.
+ */
+export function oracleReportedPrice(basePrice: number, shockedPrice: number, oracle: OracleScenario, elapsedSeconds: number): number {
+  if (oracle.failure) return basePrice;
+  const lastUpdate = oracle.staleAfterSeconds > 0 ? Math.min(elapsedSeconds, oracle.staleAfterSeconds) : elapsedSeconds;
+  const readingTime = Math.max(0, lastUpdate - oracle.delaySeconds);
+  const progress = oracle.rampSeconds > 0 ? clamp(readingTime / oracle.rampSeconds, 0, 1) : 1;
+  const converged = basePrice + (shockedPrice - basePrice) * progress;
+  return converged * (1 + oracle.divergence);
+}
+
+/** True price after the full shock has propagated; oracle lags separately. */
+export function shockedPrices(base: PriceMap, scenario: StressScenario): PriceMap {
+  return applyPriceShocks(base, scenario);
 }
 
 export function valueAmounts(amounts: Position["collateral"], prices: PriceMap): number {
@@ -66,6 +98,11 @@ export function validateScenario(scenario: StressScenario) {
   for (const [market, shock] of Object.entries(scenario.liquidityShocks)) {
     if (!Number.isFinite(shock) || shock <= -1 || shock > 0) throw new Error(`Liquidity shock for ${market} must be between -100% and 0%.`);
   }
+  const oracle = resolveOracle(scenario);
+  if (!Number.isFinite(oracle.delaySeconds) || oracle.delaySeconds < 0 || oracle.delaySeconds > 3600) throw new Error("Oracle delay must be between 0 and 3600 seconds.");
+  if (!Number.isFinite(oracle.rampSeconds) || oracle.rampSeconds < 0 || oracle.rampSeconds > 3600) throw new Error("Oracle ramp must be between 0 and 3600 seconds.");
+  if (!Number.isFinite(oracle.divergence) || Math.abs(oracle.divergence) > 0.5) throw new Error("Oracle divergence must be between -50% and +50%.");
+  if (!Number.isFinite(oracle.staleAfterSeconds) || oracle.staleAfterSeconds < 0 || oracle.staleAfterSeconds > 3600) throw new Error("Oracle staleness window must be between 0 and 3600 seconds.");
 }
 
 export function capShock(shock: number | undefined) { return clamp(shock ?? 0, -0.99, 0); }

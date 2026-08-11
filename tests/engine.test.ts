@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { demoBlendSnapshot } from "@/data/demo-blend-snapshot";
-import { executeCollateralSale, stressedLiquidity } from "@/engine/liquidation";
-import { applyPriceShocks, revaluePosition } from "@/engine/revaluation";
+import { executeCollateralSale, liquidityValue, poolTouchPrice, stressedLiquidity } from "@/engine/liquidation";
+import { applyPriceShocks, oracleReportedPrice, revaluePosition, resolveOracle } from "@/engine/revaluation";
 import { defaultScenario, runStressTest } from "@/engine/simulation";
 
 describe("position revaluation", () => {
@@ -37,6 +37,85 @@ describe("liquidation execution", () => {
   it("applies a liquidity shock to executable order-book size", () => {
     const state = stressedLiquidity({ marketId: "XLM_USDC", bidLevels: [{ price: 1, baseAmount: 100 }], provenance: demoBlendSnapshot.provenance }, -0.4, 1);
     expect(state.bidLevels[0].baseAmount).toBeCloseTo(60, 8);
+  });
+
+  it("routes across the book and multiple AMM pools in price priority", () => {
+    const state = stressedLiquidity({
+      marketId: "XLM_USDC",
+      bidLevels: [{ price: 1, baseAmount: 100 }],
+      amms: [
+        { id: "AMM:a", baseReserve: 100_000, quoteReserve: 100_000, feeBps: 30 },
+        { id: "AMM:b", baseReserve: 60_000, quoteReserve: 60_000, feeBps: 30 },
+      ],
+      provenance: demoBlendSnapshot.provenance,
+    }, 0, 1);
+    const execution = executeCollateralSale(state, 400_000, 1).estimate;
+    expect(execution.unexecutedBaseAmount).toBe(0);
+    expect(execution.venues.some((venue) => venue.venueId === "SDEX")).toBe(true);
+    expect(execution.venues.some((venue) => venue.venueId === "AMM:a")).toBe(true);
+    expect(execution.venues.some((venue) => venue.venueId === "AMM:b")).toBe(true);
+    const sumQuote = execution.venues.reduce((acc, venue) => acc + venue.quoteUsd, 0);
+    expect(sumQuote).toBeCloseTo(execution.recoveredUsd, 6);
+    expect(execution.recoveredUsd).toBeLessThan(400_000); // price impact, not spot
+  });
+
+  it("capped AMM participation bounds modeled executable value", () => {
+    const state = stressedLiquidity({
+      marketId: "XLM_USDC",
+      bidLevels: [],
+      amms: [{ id: "AMM:single", baseReserve: 1_000_000, quoteReserve: 400_000, feeBps: 30 }],
+      provenance: demoBlendSnapshot.provenance,
+    }, 0, 1);
+    expect(liquidityValue(state)).toBeCloseTo(400_000 * 0.75, 6);
+    const estimate = executeCollateralSale(state, 10_000_000, 1).estimate;
+    expect(estimate.recoveredUsd).toBeLessThanOrEqual(400_000 * 0.75);
+  });
+
+  it("reports per-venue breakdown and pool touch prices", () => {
+    const state = stressedLiquidity({ marketId: "XLM_USDC", bidLevels: [], amms: [{ id: "AMM:p", baseReserve: 2000, quoteReserve: 1000, feeBps: 50 }], provenance: demoBlendSnapshot.provenance }, 0, 1);
+    expect(poolTouchPrice(state.amms[0])).toBeCloseTo(0.995 * 0.5, 6);
+  });
+});
+
+describe("oracle model", () => {
+  it("reports the pre-shock price during the lag window, then converges", () => {
+    const oracle = { delaySeconds: 10, rampSeconds: 20, divergence: 0, staleAfterSeconds: 0, failure: false };
+    expect(oracleReportedPrice(1, 0.5, oracle, 0)).toBe(1); // reading time = 0
+    expect(oracleReportedPrice(1, 0.5, oracle, 10)).toBe(1); // reading time = 0
+    expect(oracleReportedPrice(1, 0.5, oracle, 20)).toBeCloseTo(0.75, 6); // reading = 10 → halfway
+    expect(oracleReportedPrice(1, 0.5, oracle, 30)).toBeCloseTo(0.5, 6); // fully converged
+  });
+
+  it("applies divergence bias and freezes on staleness", () => {
+    const oracle = { delaySeconds: 0, rampSeconds: 1, divergence: 0.05, staleAfterSeconds: 10, failure: false };
+    expect(oracleReportedPrice(1, 0.5, oracle, 20)).toBeCloseTo(0.525, 6); // frozen at t=10, +5% bias
+  });
+
+  it("stays frozen at the pre-shock price on failure", () => {
+    const oracle = { delaySeconds: 30, rampSeconds: 30, divergence: 0, staleAfterSeconds: 0, failure: true };
+    expect(oracleReportedPrice(1, 0.5, oracle, 500)).toBe(1);
+  });
+
+  it("back-compat: oracleDelaySeconds maps into the oracle config", () => {
+    const { oracle: _dropped, ...legacy } = defaultScenario;
+    const resolved = resolveOracle({ ...legacy, oracleDelaySeconds: 120 } as typeof defaultScenario);
+    expect(resolved.delaySeconds).toBe(120);
+  });
+
+  it("a lagging oracle spreads liquidations across cascade rounds and records both prices", () => {
+    const result = runStressTest(structuredClone(demoBlendSnapshot), { ...defaultScenario, oracle: { delaySeconds: 30, rampSeconds: 30, divergence: 0, staleAfterSeconds: 0, failure: false } });
+    expect(result.cascade.length).toBeGreaterThan(0);
+    for (const step of result.cascade) {
+      expect(step.oraclePriceUsd).toBeGreaterThanOrEqual(step.marketPriceUsd);
+      expect(step.marketPriceUsd).toBeGreaterThan(0);
+    }
+    expect(result.oracle.delaySeconds).toBe(30);
+    expect(result.assumptions.join(" ")).toContain("Oracle model");
+  });
+
+  it("an oracle failure freezes valuations at the pre-shock price", () => {
+    const failed = runStressTest(structuredClone(demoBlendSnapshot), { ...defaultScenario, oracle: { delaySeconds: 30, rampSeconds: 30, divergence: 0, staleAfterSeconds: 0, failure: true } });
+    expect(failed.cascade.every((step) => step.oraclePriceUsd === 0.4)).toBe(true);
   });
 });
 

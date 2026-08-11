@@ -42,10 +42,16 @@ export interface Market {
 }
 
 export interface OrderBookLevel { price: number; baseAmount: number; }
+export interface AmmPool {
+  id: string;
+  baseReserve: number;
+  quoteReserve: number;
+  feeBps: number;
+}
 export interface LiquiditySnapshot {
   marketId: string;
   bidLevels: OrderBookLevel[];
-  amm?: { baseReserve: number; quoteReserve: number; feeBps: number };
+  amms?: AmmPool[];
   provenance: DataProvenance;
 }
 
@@ -76,12 +82,27 @@ export interface MarketDataProvider {
   getHistoricalPrices?(assetId: string, period: string): Promise<number[]>;
 }
 
+export interface OracleScenario {
+  /** How far behind the true market price the reported oracle price is (seconds). */
+  delaySeconds: number;
+  /** Duration of the linear oracle convergence to the shocked price (seconds). */
+  rampSeconds: number;
+  /** Signed bias applied to the reported price: +0.01 = reported 1% above true. */
+  divergence: number;
+  /** > 0: the oracle stops updating after this many seconds and reports its last value. */
+  staleAfterSeconds: number;
+  /** True: the oracle is frozen at the pre-shock price for the whole simulation. */
+  failure: boolean;
+}
+
 export interface StressScenario {
   id?: string;
   name: string;
   assetPriceShocks: Record<string, number>;
   liquidityShocks: Record<string, number>;
-  oracleDelaySeconds: number;
+  /** @deprecated Use oracle.delaySeconds. Kept for UI/config back-compat. */
+  oracleDelaySeconds?: number;
+  oracle: OracleScenario;
   maxCascadeIterations: number;
   maxSlippage: number;
 }
@@ -95,6 +116,14 @@ export interface RevaluedPosition extends Position {
   classification: PositionClassification;
 }
 
+export interface ExecutionVenue {
+  venueId: string;
+  venueKind: "ORDER_BOOK" | "AMM";
+  baseAmount: number;
+  quoteUsd: number;
+  averagePrice: number;
+}
+
 export interface ExecutionEstimate {
   requestedBaseAmount: number;
   executedBaseAmount: number;
@@ -104,16 +133,19 @@ export interface ExecutionEstimate {
   priceImpact: number;
   slippage: number;
   unexecutedBaseAmount: number;
+  venues: ExecutionVenue[];
 }
 
 export interface CascadeIteration {
   iteration: number;
+  elapsedSeconds: number;
   newlyLiquidatable: number;
   totalLiquidatable: number;
   collateralSoldXlm: number;
   recoveredUsd: number;
   estimatedBadDebtUsd: number;
   marketPriceUsd: number;
+  oraclePriceUsd: number;
   priceImpact: number;
   remainingDepthUsd: number;
 }
@@ -158,6 +190,7 @@ export interface StressTestResult {
   scenario: StressScenario;
   data: DataProvenance;
   generatedAt: string;
+  oracle: OracleScenario;
   summary: {
     totalPositions: number;
     affectedPositions: number;

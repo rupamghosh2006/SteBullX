@@ -45,7 +45,10 @@ export const demoBlendSnapshot: ProtocolSnapshot = {
       { price: 0.372, baseAmount: 2_400_000 },
       { price: 0.35, baseAmount: 2_600_000 },
     ],
-    amm: { baseReserve: 3_000_000, quoteReserve: 1_200_000, feeBps: 30 },
+    amms: [
+      { id: "AMM:demo-blend-pool-v1", baseReserve: 3_000_000, quoteReserve: 1_200_000, feeBps: 30 },
+      { id: "AMM:demo-liquidity-pool-v2", baseReserve: 1_400_000, quoteReserve: 560_000, feeBps: 45 },
+    ],
     provenance: {
       kind: "DEMO",
       source: "SteBullX deterministic Blend/XLM-USDC fixture v1",

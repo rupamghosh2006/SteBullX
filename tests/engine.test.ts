@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { demoBlendSnapshot } from "@/data/demo-blend-snapshot";
+import { replayArchive } from "@/data/historical-archive";
+import { replayEpisode } from "@/engine/replay";
 import { executeCollateralSale, liquidityValue, poolTouchPrice, stressedLiquidity } from "@/engine/liquidation";
 import { applyPriceShocks, oracleReportedPrice, revaluePosition, resolveOracle } from "@/engine/revaluation";
 import { defaultScenario, runStressTest } from "@/engine/simulation";
@@ -116,6 +118,34 @@ describe("oracle model", () => {
   it("an oracle failure freezes valuations at the pre-shock price", () => {
     const failed = runStressTest(structuredClone(demoBlendSnapshot), { ...defaultScenario, oracle: { delaySeconds: 30, rampSeconds: 30, divergence: 0, staleAfterSeconds: 0, failure: true } });
     expect(failed.cascade.every((step) => step.oraclePriceUsd === 0.4)).toBe(true);
+  });
+});
+
+describe("historical replay", () => {
+  it("replays an archived episode and reports prediction-vs-observed errors", () => {
+    const replay = replayEpisode(replayArchive[0]);
+    expect(replay.id.startsWith("REPLAY-")).toBe(true);
+    expect(replay.startLedger).toBe(12_842_192);
+    expect(replay.endLedger).toBe(12_842_412);
+    expect(replay.scenario.assetPriceShocks.XLM).toBeCloseTo(0.32 / 0.4 - 1, 8);
+    expect(replay.predicted.liquidationVolumeUsd).toBeGreaterThan(0);
+    expect(typeof replay.errors.liquidationVolumeErrorPct).toBe("number");
+    expect(replay.errors.cascadeDepthDelta).toBe(replay.predicted.cascadeDepth - replay.observed.cascadeDepth);
+    expect(replay.warnings[0]).toContain("fixture");
+  });
+
+  it("is deterministic for the same episode", () => {
+    const first = replayEpisode(replayArchive[1]);
+    const second = replayEpisode(replayArchive[1]);
+    expect(first.predicted).toEqual(second.predicted);
+    expect(first.id).toBe(second.id);
+    expect(first.errors).toEqual(second.errors);
+  });
+
+  it("rejects ascending market paths", () => {
+    const ascending = structuredClone(replayArchive[2]);
+    ascending.marketPath = [{ ledger: 1, xlmUsd: 0.4 }, { ledger: 2, xlmUsd: 0.45 }];
+    expect(() => replayEpisode(ascending)).toThrow("market decline");
   });
 });
 

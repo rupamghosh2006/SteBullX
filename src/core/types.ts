@@ -183,8 +183,69 @@ export interface SimulationAudit {
   modelVersion: string;
 }
 
-export interface StressTestResult {
+export interface HistoricalEpisode {
   id: string;
+  protocol: "blend";
+  marketId: string;
+  title: string;
+  startLedger: number;
+  endLedger: number;
+  startedAt: string;
+  startSnapshot: ProtocolSnapshot;
+  /** Observed market movement over the episode, ledger-pinned. */
+  marketPath: { ledger: number; xlmUsd: number }[];
+  /** Explicit replay assumptions archived with the episode. */
+  assumed: {
+    liquidityShock: number;
+    oracle: OracleScenario;
+    maxCascadeIterations: number;
+    maxSlippage: number;
+  };
+  /** Archived observed outcome, for model-error tracking. */
+  observed: {
+    liquidationVolumeUsd: number;
+    badDebtUsd: number;
+    priceImpactPct: number;
+    cascadeDepth: number;
+    affectedPositions: number;
+  };
+  note: string;
+}
+
+export interface ReplayPrediction {
+  liquidationVolumeUsd: number;
+  badDebtUsd: number;
+  priceImpactPct: number;
+  cascadeDepth: number;
+  affectedPositions: number;
+}
+
+export interface HistoricalReplayResult {
+  id: string;
+  episodeId: string;
+  protocol: string;
+  marketId: string;
+  startLedger: number;
+  endLedger: number;
+  startedAt: string;
+  generatedAt: string;
+  modelVersion: string;
+  predicted: ReplayPrediction;
+  observed: HistoricalEpisode["observed"];
+  errors: {
+    liquidationVolumeErrorPct: number;
+    badDebtErrorPct: number;
+    priceImpactDeltaPct: number;
+    cascadeDepthDelta: number;
+    affectedPositionsDelta: number;
+  };
+  scenario: StressScenario;
+  cascade: CascadeIteration[];
+  inputHash: string;
+  warnings: string[];
+}
+
+export interface StressTestResult { id: string;
   protocol: string;
   market: string;
   scenario: StressScenario;

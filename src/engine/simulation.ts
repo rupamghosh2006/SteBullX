@@ -79,7 +79,8 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
   let badDebtUsd = 0;
   let liquidatableCollateralUsd = 0;
   let elapsedSeconds = 0;
-  let lastOraclePrice = Number.POSITIVE_INFINITY;
+  // The oracle feed stops changing after this many seconds: frozen (failure), stale, or fully converged.
+  const convergenceEndSeconds = oracle.failure ? 0 : Math.min(oracle.staleAfterSeconds > 0 ? oracle.staleAfterSeconds : Number.POSITIVE_INFINITY, oracle.rampSeconds + oracle.delaySeconds);
 
   for (let iteration = 0; iteration <= scenario.maxCascadeIterations; iteration += 1) {
     const oraclePrices = oraclePricesAt(elapsedSeconds);
@@ -87,10 +88,8 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
     const newlyLiquidatable = revalued.filter((position) => isLiquidatable(position) && !processed.has(position.id));
 
     if (newlyLiquidatable.length === 0) {
-      const oracleDescending = oraclePrices.XLM < lastOraclePrice;
-      lastOraclePrice = oraclePrices.XLM;
       elapsedSeconds += stepSeconds;
-      if (oracleDescending) continue; // price feed still converging; keep advancing time
+      if (elapsedSeconds <= convergenceEndSeconds) continue; // price feed still converging; keep advancing time
       break;
     }
     if (cascade.length >= scenario.maxCascadeIterations) break; // iteration budget exhausted
@@ -122,7 +121,6 @@ export function runStressTest(snapshot: ProtocolSnapshot, scenario: StressScenar
       remainingDepthUsd: round(liquidityValue(liquidityState)),
     });
     elapsedSeconds += stepSeconds;
-    lastOraclePrice = oraclePrices.XLM;
     if (execution.estimate.executedBaseAmount === 0) break;
   }
 

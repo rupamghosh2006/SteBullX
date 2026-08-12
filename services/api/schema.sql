@@ -9,3 +9,11 @@ CREATE TABLE IF NOT EXISTS stress_tests (
 );
 
 CREATE INDEX IF NOT EXISTS stress_tests_created_at_idx ON stress_tests (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS replay_archives (
+  id TEXT PRIMARY KEY,
+  episode JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS replay_archives_created_at_idx ON replay_archives (created_at DESC);

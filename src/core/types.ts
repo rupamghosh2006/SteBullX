@@ -79,6 +79,8 @@ export interface MarketDataProvider {
   getSpotPrice(assetId: string): Promise<{ price: number; provenance: DataProvenance }>;
   getOrderBook(marketId: string): Promise<LiquiditySnapshot>;
   getLiquidity(marketId: string): Promise<{ executableDepthUsd: number; provenance: DataProvenance }>;
+  getPools?(marketId: string, maxPages?: number): Promise<AmmPool[]>;
+  getLiquiditySnapshot?(marketId: string): Promise<LiquiditySnapshot>;
   getHistoricalPrices?(assetId: string, period: string): Promise<number[]>;
 }
 

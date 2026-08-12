@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { DataStamp, Metric, Section } from "@/components/ui";
 
-interface Episode { id: string; protocol: string; marketId: string; title: string; startLedger: number; endLedger: number; startedAt: string; note: string; }
+interface Episode { id: string; protocol: string; marketId: string; title: string; startLedger: number; endLedger: number; startedAt: string; note: string; observed: { liquidationVolumeUsd: number; badDebtUsd: number; priceImpactPct: number; cascadeDepth: number; affectedPositions: number }; }
 interface ReplayResult {
   id: string; episodeId: string; startLedger: number; endLedger: number; modelVersion: string;
   predicted: { liquidationVolumeUsd: number; badDebtUsd: number; priceImpactPct: number; cascadeDepth: number; affectedPositions: number };
@@ -27,6 +27,10 @@ export default function ReplayPage() {
     void fetch("/api/v1/replays").then((response) => response.json()).then((payload) => setEpisodes(payload.episodes ?? [])).catch(() => setError("Unable to load replay episodes."));
   }, []);
 
+  const ledgerRange = episodes.length > 0
+    ? `${Math.min(...episodes.map((episode) => episode.startLedger)).toLocaleString()} – ${Math.max(...episodes.map((episode) => episode.endLedger)).toLocaleString()}`
+    : "—";
+
   const runReplay = useCallback(async (episodeId: string) => {
     setRunning(true); setError(null);
     try {
@@ -42,7 +46,7 @@ export default function ReplayPage() {
     <main>
       <header className="hero">
         <div><p className="eyebrow">MODEL VALIDATION</p><h1>Historical Replay</h1><p className="page-intro">Reconstruct protocol state at a pinned ledger, replay the market movement, and compare the prediction against the archived outcome.</p></div>
-        <DataStamp fields={[["ARCHIVE", "3 episodes"], ["LEDGER RANGE", "12,842,192 – 13,511,500"], ["PURPOSE", "calibration tracking"]]} />
+        <DataStamp fields={[["ARCHIVE", `${episodes.length} episodes`], ["LEDGER RANGE", ledgerRange], ["PURPOSE", "calibration tracking"]]} />
       </header>
 
       {error && <p className="error">{error}</p>}
@@ -57,7 +61,7 @@ export default function ReplayPage() {
                 <td><b>{episode.title}</b><br /><span style={{ color: "var(--muted)", fontSize: 10 }}>{episode.note}</span></td>
                 <td>{episode.startLedger.toLocaleString()}</td>
                 <td>{episode.endLedger.toLocaleString()}</td>
-                <td>—</td>
+                <td>{episode.observed?.liquidationVolumeUsd ? USD.format(episode.observed.liquidationVolumeUsd) : "—"}</td>
                 <td>
                   <button className="link" style={{ border: 0, background: "none", padding: 0 }} disabled={running} onClick={() => { setSelected(episode.id); void runReplay(episode.id); }}>
                     {running && selected === episode.id ? "REPLAYING…" : "REPLAY →"}

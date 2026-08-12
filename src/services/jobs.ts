@@ -1,7 +1,7 @@
 import { runStressTest, defaultScenario } from "@/engine/simulation";
 import { replayEpisode } from "@/engine/replay";
 import { getEpisode } from "@/data/historical-archive";
-import { BlendAdapter } from "@/protocols/blend/adapter";
+import { resolveBlendSnapshot } from "@/services/data-source";
 import { saveResult } from "@/services/result-store";
 import { takeJob, updateJob, type Job } from "@/services/queue";
 import { error as logError, info, recordMetric } from "@/services/observability";
@@ -14,7 +14,7 @@ export async function processJob(job: Job): Promise<void> {
       const protocol = (job.payload.protocol as string | undefined) ?? "blend";
       if (protocol !== "blend") throw new Error("Only the Blend MVP adapter is available.");
       const scenario: StressScenario = { ...defaultScenario, ...(job.payload.scenario as Partial<StressScenario> | undefined) };
-      const result = runStressTest(await new BlendAdapter().getSnapshot(), scenario);
+      const result = runStressTest(await resolveBlendSnapshot(), scenario);
       await saveResult(result);
       await updateJob(job.jobId, { status: "SUCCEEDED", resultId: result.id, finishedAt: new Date().toISOString() });
       await recordMetric("jobs.processed");
@@ -23,7 +23,7 @@ export async function processJob(job: Job): Promise<void> {
     }
     if (job.type === "REPLAY") {
       const episodeId = job.payload.episodeId as string;
-      const episode = getEpisode(episodeId);
+      const episode = await getEpisode(episodeId);
       if (!episode) throw new Error(`Unknown episode ${episodeId}.`);
       const replay = replayEpisode(episode);
       await saveResult(replay);

@@ -62,6 +62,27 @@ with Redis, run the worker loop in a separate process:
 npm run worker
 ```
 
+## Live data mode
+
+The default is deterministic DEMO mode. Set `DATA_SOURCE=live` with `BLEND_API_URL`
+pointing at a normalized Blend index (see [docs/LIVE_BLEND_ADAPTER.md](docs/LIVE_BLEND_ADAPTER.md)
+for the payload contract and what "live" means for Blend positions) to serve real
+positions; with `STELLAR_USDC_ISSUER` also set, the live SDEX order book and
+constant-product XLM/USDC pools are layered in for execution depth. Live mode throws
+rather than silently mixing in demo data, and routes return `503` with the reason when
+a live source is unavailable.
+
+Capture replay episodes on a schedule from the live source:
+
+```bash
+npm run archive
+```
+
+Each capture is stored as a HISTORICAL episode (PostgreSQL `replay_archives`, else
+Redis, else a local file), measures the move against the previous capture, and feeds
+the `/replay` dashboard and replay API — turning the stress-test model into a
+calibration loop against captured state.
+
 ## API
 
 The versioned developer API lives under `/api/v1`. Set `STEBULLX_API_KEY` in a hosted
@@ -158,11 +179,14 @@ src/
   data/                Explicitly labelled deterministic demo fixture + historical archive
   engine/              Revaluation, execution, cascade, risk-score, replay engines
   lib/                 Canned deterministic analytics for the dashboard
-  market-data/         Pluggable Stellar market data provider
-  protocols/blend/     MVP Blend adapter
-  services/            Persistence, Redis queue, worker jobs, observability
+  market-data/         Pluggable Stellar market data provider (Horizon; live
+                       order book, spot, constant-product XLM/USDC pools)
+  protocols/blend/     MVP Blend adapter (DEMO) + live Blend index adapter
+  services/            Persistence, data-source resolver, Redis queue, worker
+                       jobs, observability, snapshot archiver
 scripts/
   worker.ts            Background job worker loop (Redis)
+  archive.ts           Historical episode capture (`npm run archive`)
 contracts/
   stress-registry/     Optional Soroban hash-attestation contract
 services/api/          PostgreSQL schema and API deployment notes

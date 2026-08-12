@@ -5,3 +5,5 @@ coverage
 .env.local
 *.log
 target
+data/archive-store.json
+data/test-archive-*.json

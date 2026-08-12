@@ -1,5 +1,6 @@
 import type { HistoricalEpisode } from "@/core/types";
 import { demoBlendSnapshot } from "./demo-blend-snapshot";
+import { listArchivedEpisodes, getArchivedEpisode } from "@/services/archive-store";
 
 /**
  * Deterministic, hand-authored replay archive. Entries are explicitly labelled
@@ -116,6 +117,13 @@ export const replayArchive: HistoricalEpisode[] = [
   },
 ];
 
-export function getEpisode(id: string): HistoricalEpisode | undefined {
-  return replayArchive.find((episode) => episode.id === id);
+/** Merges the hand-authored fixture archive with state captured by `npm run archive`. */
+export async function listEpisodes(): Promise<HistoricalEpisode[]> {
+  const archived = await listArchivedEpisodes();
+  const ids = new Set(archived.map((episode) => episode.id));
+  return [...replayArchive.filter((episode) => !ids.has(episode.id)), ...archived];
+}
+
+export async function getEpisode(id: string): Promise<HistoricalEpisode | undefined> {
+  return replayArchive.find((episode) => episode.id === id) ?? getArchivedEpisode(id);
 }

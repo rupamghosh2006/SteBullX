@@ -1,6 +1,20 @@
-import type { DataProvenance, LiquiditySnapshot, MarketDataProvider } from "@/core/types";
+import type { AmmPool, DataProvenance, LiquiditySnapshot, MarketDataProvider } from "@/core/types";
 
 type HorizonBook = { bids?: Array<{ price: string; amount: string }> };
+type HorizonPoolRecord = {
+  id: string;
+  type: "constant_product" | "stable";
+  fee_bp: number;
+  reserves: Array<{ asset: string; amount: string }>;
+  last_modified_ledger: string;
+};
+type HorizonPoolPage = { _links: { next?: { href: string } }; _embedded: { records: HorizonPoolRecord[] } };
+
+const MAX_POOL_PAGES = 5;
+
+function resolveHref(base: string, href: string): string {
+  try { return new URL(href, base).toString(); } catch { return href; }
+}
 
 /**
  * Optional live SDEX provider. It needs a verified USDC issuer in environment
@@ -46,5 +60,64 @@ export class StellarHorizonMarketDataProvider implements MarketDataProvider {
   async getLiquidity(marketId: string) {
     const book = await this.getOrderBook(marketId);
     return { executableDepthUsd: book.bidLevels.reduce((total, level) => total + level.price * level.baseAmount, 0), provenance: book.provenance };
+  }
+
+  private isNative(asset: string) {
+    return asset === "native" || asset.startsWith("XLM:");
+  }
+
+  private isUsdc(asset: string) {
+    return asset === `USDC:${this.usdcIssuer}`;
+  }
+
+  /**
+   * Constant-product pools holding exactly {native XLM, USDC:<issuer>}. The
+   * Horizon record's canonical asset form is `Code:Issuer`; native XLM appears
+   * as `native`. Client-side filtering keeps the mapping correct regardless of
+   * the reserved filter-string format, at the cost of paginating recent pools.
+   */
+  async getPools(marketId: string, maxPages = MAX_POOL_PAGES): Promise<AmmPool[]> {
+    if (marketId !== "XLM_USDC") throw new Error(`Unsupported live market: ${marketId}`);
+    this.assertConfigured();
+    const capturedAt = new Date().toISOString();
+    const pools: AmmPool[] = [];
+    const seen = new Set<string>();
+    let url: string | undefined = `${this.endpoint}/liquidity_pools?limit=200&order=desc`;
+    for (let page = 0; page < maxPages && url; page += 1) {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Horizon liquidity pools request failed (${response.status}).`);
+      const payload = await response.json() as HorizonPoolPage;
+      for (const record of payload._embedded.records) {
+        if (record.type !== "constant_product" || seen.has(record.id)) continue;
+        const xlm = record.reserves.find((reserve) => this.isNative(reserve.asset));
+        const usdc = record.reserves.find((reserve) => this.isUsdc(reserve.asset));
+        if (!xlm || !usdc || record.reserves.length !== 2) continue;
+        seen.add(record.id);
+        pools.push({
+          id: record.id,
+          baseReserve: Number(xlm.amount),
+          quoteReserve: Number(usdc.amount),
+          feeBps: record.fee_bp,
+        });
+      }
+      url = payload._links.next?.href ? resolveHref(this.endpoint, payload._links.next.href) : undefined;
+    }
+    return pools;
+  }
+
+  async getLiquiditySnapshot(marketId: string): Promise<LiquiditySnapshot> {
+    const book = await this.getOrderBook(marketId);
+    const amms = await this.getPools(marketId);
+    return {
+      marketId,
+      bidLevels: book.bidLevels,
+      amms,
+      provenance: {
+        kind: "LIVE",
+        source: `${this.endpoint}/order_book + /liquidity_pools`,
+        capturedAt: new Date().toISOString(),
+        note: "SDEX order-book snapshot plus constant-product XLM/USDC pools; exclude venues not represented here.",
+      },
+    };
   }
 }

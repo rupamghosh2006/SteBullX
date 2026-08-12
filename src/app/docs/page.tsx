@@ -6,38 +6,69 @@ import { modelVersion } from "@/lib/demo-analytics";
 export const metadata: Metadata = { title: "Documentation | SteBullX" };
 
 const DOCS = [
-  ["ARCHITECTURE.md", "Layered architecture: ingestion → normalization → simulation → risk."],
-  ["methodology.md", "Model formulas, weights, and scoring rules."],
-  ["API.md", "Full REST reference and examples."],
-  ["REPRODUCIBILITY.md", "Hashes, deterministic ids, and how to reproduce any result."],
-  ["MODEL_LIMITATIONS.md", "What the model does not claim."],
-  ["SECURITY.md", "Non-custodial by design; key handling and validation."],
+  {
+    name: "ARCHITECTURE.md",
+    note: "Detailed architecture: ingestion -> normalization -> simulation -> risk.",
+    href: "https://github.com/rupamghosh2006/SteBullX/blob/main/Architecture.md",
+  },
+  {
+    name: "methodology.md",
+    note: "Model formulas, weights, and scoring rules.",
+    href: "https://github.com/rupamghosh2006/SteBullX/blob/main/docs/methodology.md",
+  },
+  {
+    name: "API.md",
+    note: "Full REST reference and examples.",
+    href: "https://github.com/rupamghosh2006/SteBullX/blob/main/docs/API.md",
+  },
+  {
+    name: "REPRODUCIBILITY.md",
+    note: "Hashes, deterministic IDs, and how to reproduce a result.",
+    href: "https://github.com/rupamghosh2006/SteBullX/blob/main/docs/REPRODUCIBILITY.md",
+  },
+  {
+    name: "MODEL_LIMITATIONS.md",
+    note: "What the model does not claim.",
+    href: "https://github.com/rupamghosh2006/SteBullX/blob/main/docs/MODEL_LIMITATIONS.md",
+  },
+  {
+    name: "SECURITY.md",
+    note: "Non-custodial design, key handling, and validation.",
+    href: "https://github.com/rupamghosh2006/SteBullX/blob/main/docs/SECURITY.md",
+  },
 ] as const;
 
 export default function DocsPage() {
   return (
     <main>
       <header className="hero">
-        <div><p className="eyebrow">DOCUMENTATION</p><h1>Documentation</h1><p className="page-intro">Open methodology, explicit assumptions, and reproducibility instructions. The core engine is open source.</p></div>
+        <div>
+          <p className="eyebrow">DOCUMENTATION</p>
+          <h1>Documentation</h1>
+          <p className="page-intro">Open methodology, explicit assumptions, and reproducibility instructions. The core engine is open source.</p>
+        </div>
         <div className="data-stamp"><span>MODEL</span><strong>{modelVersion}</strong><small>every result identifies its model version</small></div>
       </header>
 
       <section className="dashboard-grid">
         <Section label="MODEL SAFETY" title="What SteBullX claims">
           <ul style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.7, paddingLeft: 16 }}>
-            <li>Simulations are deterministic given the same snapshot, scenario and model version.</li>
-            <li>Results are <strong>modelled estimates</strong>, never predictions of the future or guarantees of solvency.</li>
-            <li>Every result carries data provenance, assumptions, model version and a confidence score.</li>
-            <li>Observed, estimated and simulated data are always labelled separately.</li>
+            <li>Simulations are deterministic given the same snapshot, scenario, and model version.</li>
+            <li>Results are <strong>modeled estimates</strong>, never predictions of the future or guarantees of solvency.</li>
+            <li>Every result carries data provenance, assumptions, model version, and a confidence score.</li>
+            <li>Observed, estimated, and simulated data are always labelled separately.</li>
           </ul>
-          <p className="caption">Absolute rule: never fabricate live blockchain data, never present mock data as real.</p>
+          <p className="caption">Absolute rule: never fabricate live blockchain data or present mock data as real.</p>
         </Section>
         <Section label="DOCUMENTATION" title="Repository docs">
           <table>
             <thead><tr><th>DOC</th><th>CONTENT</th></tr></thead>
             <tbody>
-              {DOCS.map(([name, note]) => (
-                <tr key={name}><td><Link className="link" href={`https://github.com/rupamghosh2006/SteBullX/blob/main/docs/${name}`} target="_blank" rel="noreferrer">{name}</Link></td><td>{note}</td></tr>
+              {DOCS.map(({ name, note, href }) => (
+                <tr key={name}>
+                  <td><Link className="link" href={href} target="_blank" rel="noreferrer">{name}</Link></td>
+                  <td>{note}</td>
+                </tr>
               ))}
             </tbody>
           </table>

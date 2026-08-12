@@ -24,6 +24,12 @@ const externalLinks = [
   ["Architecture", "https://github.com/rupamghosh2006/SteBullX/blob/main/Architecture.md"],
 ] as const;
 
+const legalLinks = [
+  ["Terms of Use", "/terms"],
+  ["Privacy Policy", "/privacy"],
+  ["Cookies", "/cookies"],
+] as const;
+
 export function SiteFooter() {
   return (
     <footer className="site-footer">
@@ -55,6 +61,11 @@ export function SiteFooter() {
           {externalLinks.map(([label, href]) => (
             <a key={href} href={href} target="_blank" rel="noreferrer">{label} <span aria-hidden="true">↗</span></a>
           ))}
+        </nav>
+
+        <nav className="site-footer-links" aria-label="Legal information">
+          <p>LEGAL</p>
+          {legalLinks.map(([label, href]) => <Link key={href} href={href}>{label}</Link>)}
         </nav>
       </div>
 
